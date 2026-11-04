@@ -1,0 +1,107 @@
+# CI for every PR and main (docs/spec/08-quality-ops.md §5).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Lint, types, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Build-time placeholders only; no real keys in CI.
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder_key
+      APP_BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:env
+      - run: pnpm check:i18n
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm audit --prod --audit-level high
+      - run: pnpm build
+
+  database:
+    name: Migrations, Supabase lint, pgTAP
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,mailpit
+      - run: pnpm exec supabase db lint --local --schema public,api,private,audit --level warning --fail-on warning
+      - run: pnpm exec supabase test db
+      - name: Generated types are up to date
+        run: |
+          pnpm db:types
+          git diff --exit-code src/types/database.gen.ts
+      - name: Every public table has RLS enabled and forced
+        run: |
+          pnpm exec supabase db query --local "select count(*) as n from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and not (c.relrowsecurity and c.relforcerowsecurity)" > /tmp/rls.json
+          node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/rls.json","utf8"));const n=JSON.stringify(r).match(/"n":\s*(\d+)/);if(!n||n[1]!=="0"){console.error("Tables without forced RLS:",n&&n[1]);process.exit(1)}'
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [app, database]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+      - run: pnpm with-local next build
+      - name: Start app
+        run: |
+          pnpm with-local next start -p 3000 > app.log 2>&1 &
+          npx --yes wait-on@8.0.3 -t 60000 http://localhost:3000/api/health
+      - run: pnpm test:e2e
+        env:
+          E2E_BASE_URL: http://localhost:3000
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+            app.log
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
