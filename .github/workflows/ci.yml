@@ -60,7 +60,7 @@ jobs:
           git diff --exit-code src/types/database.gen.ts
       - name: Every public table has RLS enabled and forced
         run: |
-          pnpm exec supabase db query --local "select count(*) as n from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and not (c.relrowsecurity and c.relforcerowsecurity)" > /tmp/rls.json
+          pnpm exec supabase db query --local -o json "select count(*) as n from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and not (c.relrowsecurity and c.relforcerowsecurity)" > /tmp/rls.json
           node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/rls.json","utf8"));const n=JSON.stringify(r).match(/"n":\s*(\d+)/);if(!n||n[1]!=="0"){console.error("Tables without forced RLS:",n&&n[1]);process.exit(1)}'
 
   e2e:
