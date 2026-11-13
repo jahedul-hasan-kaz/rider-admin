@@ -108,7 +108,8 @@ export function execSql(sql: string): void {
 /** Runs ONE statement as the database owner and returns its rows (the CLI allows a single statement). */
 export function runSql<T = Record<string, unknown>>(sql: string): T[] {
   return withSqlFile(sql, (file) => {
-    const out = execFileSyncSql("pnpm", ["exec", "supabase", "db", "query", "--local", "--file", file], { encoding: "utf8", shell: true });
+    // Ask for JSON explicitly: newer CLIs print a table by default.
+    const out = execFileSyncSql("pnpm", ["exec", "supabase", "db", "query", "--local", "-o", "json", "--file", file], { encoding: "utf8", shell: true });
     const start = out.indexOf("{");
     const parsed = JSON.parse(out.slice(start, out.lastIndexOf("}") + 1));
     return (parsed.rows ?? []) as T[];

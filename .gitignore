@@ -31,7 +31,6 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
 !.env.example
 
 # vercel
@@ -50,3 +49,4 @@ next-env.d.ts
 
 # generated vendor assets (scripts/copy-vendor.mjs)
 /public/vendor
+config.bat
