@@ -1,0 +1,316 @@
+{
+  "title": "Rider platform: end-to-end workflow (passenger, driver, money)",
+  "version": "2026-11-09",
+  "currency": "BDT",
+  "how_to_read": "Each step says who does it, what happens, which API call does it, the rules the system enforces, and its status. All API paths are under /api/v1 and need the person's own sign-in token.",
+  "status_legend": {
+    "built": "Works today in the backend (and admin panel where relevant).",
+    "partial": "The backend part exists; the mobile app screen or one piece of the behaviour does not.",
+    "not_built": "Not built yet; the note says what it would take."
+  },
+  "important": "The passenger and driver mobile apps are not built yet. Everything marked built is in the backend API and the admin panel; an app must call these APIs.",
+
+  "actors": {
+    "passenger": "Books rides, pays the driver in cash, rates the driver.",
+    "driver": "Goes online, accepts ride offers, drives, collects cash, settles dues with the organisation, receives payouts.",
+    "system": "Prices rides, finds and offers drivers, keeps the ledger, runs scheduled jobs.",
+    "admin": "Organisation staff in the admin panel: approve drivers, watch rides, settle cash, pay drivers, handle support and safety."
+  },
+
+  "passenger_flow": [
+    {
+      "id": "P1",
+      "title": "Enable current location",
+      "actor": "passenger",
+      "what_happens": "The app asks for location permission and reads the phone's GPS. The backend checks the point is inside a service area.",
+      "api": "GET /zones/check?lat={lat}&lng={lng}",
+      "rules": ["Rides can only start inside an active service zone (Gulshan & Banani, Dhanmondi, Uttara, Mirpur, Motijheel in the demo data)."],
+      "status": "partial",
+      "note": "The zone check is built. Reading GPS is a mobile-app job (app not built)."
+    },
+    {
+      "id": "P2",
+      "title": "Choose pickup and destination",
+      "actor": "passenger",
+      "what_happens": "Pickup defaults to the current location. The passenger picks or types the destination. A place copied from Google Maps (e.g. '23.7806, 90.4074') is turned into latitude and longitude by the app.",
+      "api": "No call yet: the points are sent with the quote in P3.",
+      "rules": [
+        "Each point is latitude, longitude and an optional name (up to 200 characters).",
+        "The pickup must be inside a service zone; the destination may be outside it."
+      ],
+      "status": "partial",
+      "note": "The API takes coordinates and names. Pasting 'lat, lng' is supported in the admin 'Book a ride' drawer today. Reading a full Google Maps share link (https://maps.app.goo.gl/...) and place search need the app plus a geocoding provider (Google Places or Barikoi), not built."
+    },
+    {
+      "id": "P3",
+      "title": "Search: see the fare and the drivers nearby",
+      "actor": "passenger",
+      "what_happens": "The passenger picks a vehicle type (Bike, Car, CNG). The system calculates the route distance and time, prices the ride from the live fare rule (including any surge) and counts the available drivers nearby.",
+      "api": "POST /quotes  { category_id, pickup: {lat, lng, label}, destination: {lat, lng, label} }",
+      "returns": ["quote id", "estimated fare and its breakdown", "surge multiplier", "number of available drivers nearby", "quote expiry time"],
+      "rules": [
+        "The fare is frozen in the quote: the passenger pays what they were shown (plus waiting time or a changed route).",
+        "Distance and time come from Google Routes when configured, otherwise from an estimate."
+      ],
+      "status": "partial",
+      "note": "Built: fare, surge and the COUNT of nearby drivers. Not built: showing each nearby driver on the passenger's map (needs a privacy-safe 'nearby drivers' endpoint that returns approximate positions only)."
+    },
+    {
+      "id": "P4",
+      "title": "Request the ride",
+      "actor": "passenger",
+      "what_happens": "The passenger confirms the quote, chooses cash and can add a pickup note or a promo code. The request goes to dispatch.",
+      "api": "POST /rides  { quote_id, payment_method: 'cash', pickup_note }   then optionally  POST /rides/{id}/promo  { code }",
+      "rules": [
+        "ONE active request per passenger: a second request is refused until the first is cancelled, completed or expired.",
+        "Only cash is enabled (setting payments.enabled_methods). Digital payments are not built."
+      ],
+      "status": "built"
+    },
+    {
+      "id": "P5",
+      "title": "Driver matching",
+      "actor": "system",
+      "what_happens": "Dispatch offers the ride to the NEAREST free driver with the right vehicle type. That driver has 15 seconds to accept. If they decline or don't answer, the next nearest driver gets the offer. The search widens from 1.5 km to 3 km to 5 km. With nobody after 3 minutes the request closes as 'no driver found'.",
+      "api": "GET /rides/{id}  (passenger watches the status: searching → matched)",
+      "rules": [
+        "A ride is offered to one driver at a time; a driver gets one offer at a time.",
+        "Only approved, online drivers with a fresh location and an active vehicle of that type are offered rides.",
+        "Staff can re-dispatch, assign a specific driver or cancel from the admin panel (Ride requests)."
+      ],
+      "status": "built",
+      "about_choosing_a_driver": {
+        "driver_picks_passenger": "Built: the driver sees the offer (pickup, destination, fare, distance) and accepts or declines it (see D4).",
+        "passenger_picks_driver": "Not built. Today the system picks the nearest driver automatically, which is faster and fairer. If you want passengers to choose, the change is: show 3–5 nearby drivers with name, rating, vehicle and ETA after the quote, the passenger taps one, and that driver alone gets the offer (if they decline or time out, the passenger chooses again). The one-active-request and one-offer-per-driver locks stay the same."
+      }
+    },
+    {
+      "id": "P6",
+      "title": "Driver assigned: track the driver",
+      "actor": "passenger",
+      "what_happens": "The passenger sees the driver's name, rating, vehicle and plate, and follows the driver's progress: on the way → arrived.",
+      "api": "GET /rides/{id}   (realtime channel 'ride:{id}' also announces each status change)",
+      "rules": ["If the pickup PIN feature flag is on, the passenger reads a 4-digit PIN to the driver at pickup (GET /rides/{id}/pin)."],
+      "status": "built"
+    },
+    {
+      "id": "P7",
+      "title": "Cancel (the standard way)",
+      "actor": "passenger",
+      "what_happens": "Before the ride starts the passenger can cancel. The app first shows whether a fee applies, then cancels with a reason.",
+      "api": "GET /rides/{id}/cancel-preview   then   POST /rides/{id}/cancel  { reason }",
+      "rules": [
+        "Free while searching, and within 2 minutes of a driver being assigned.",
+        "Later, a cancellation fee applies (Bike 30, Car 50, CNG 40 in the demo fare rules). It is added to the passenger's next ride; the driver receives it minus the platform commission.",
+        "A ride that has started cannot be cancelled by the passenger.",
+        "After cancelling, the passenger is free to request again."
+      ],
+      "status": "built"
+    },
+    {
+      "id": "P8",
+      "title": "Ride in progress and completed",
+      "actor": "system",
+      "what_happens": "The driver starts the trip at pickup and completes it at the destination. The final fare is calculated from the frozen fare rule and the recorded route, time and waiting.",
+      "api": "GET /rides/{id}   then   GET /trips/{id}/receipt",
+      "rules": ["SOS is available throughout the ride: POST /trips/{id}/sos alerts the safety team at once (with evidence upload)."],
+      "status": "built"
+    },
+    {
+      "id": "P9",
+      "title": "Pay the driver",
+      "actor": "passenger",
+      "what_happens": "The passenger pays the final fare in cash to the driver (fare minus any promo discount, plus any cancellation fee owed from earlier).",
+      "api": "GET /trips/{id}/receipt  (shows the amount to pay)",
+      "rules": ["The driver confirms the cash in their app (D7). Unconfirmed cash is flagged to finance after 24 hours."],
+      "status": "built",
+      "note": "bKash / Nagad / card payment is not built (needs merchant accounts); see docs/integrations/digital-payments.md."
+    },
+    {
+      "id": "P10",
+      "title": "Rate and review the driver",
+      "actor": "passenger",
+      "what_happens": "The passenger gives 1–5 stars and an optional comment. The driver can rate the passenger the same way.",
+      "api": "POST /trips/{id}/rate  { score: 1-5, comment }",
+      "rules": [
+        "Once per trip, within 7 days of completion (setting ratings.window_days).",
+        "Ratings feed the driver's average rating. Staff can hide abusive comments (Ratings page, with a reason)."
+      ],
+      "status": "built"
+    },
+    {
+      "id": "P11",
+      "title": "Help after the ride",
+      "actor": "passenger",
+      "what_happens": "Lost item, overcharge or complaint: the passenger opens a support ticket. Staff can refund (approved by finance).",
+      "api": "POST /support/tickets  { tripId, category, subject, body }",
+      "status": "built"
+    }
+  ],
+
+  "driver_flow": [
+    {
+      "id": "D1",
+      "title": "Sign up and onboard",
+      "actor": "driver",
+      "what_happens": "The driver creates an account, fills in details, adds a vehicle and uploads documents (NID, driving licence, profile photo, registration, fitness, tax token, insurance; route permit for CNG), then submits the application.",
+      "api": "POST /onboarding/driver → PATCH /driver/details → POST /driver/vehicles → POST /driver/documents/upload-url + POST /driver/documents/{id}/complete → POST /driver/application/submit",
+      "status": "built"
+    },
+    {
+      "id": "D2",
+      "title": "Approval by the organisation",
+      "actor": "admin",
+      "what_happens": "Operations reviews each document (approve or reject with a reason), verifies the vehicle and approves the driver. Staff can also create the driver and upload documents for them.",
+      "where": "Admin panel → Drivers → Review application; Documents queue",
+      "rules": ["Expired documents suspend the driver automatically until renewed."],
+      "status": "built"
+    },
+    {
+      "id": "D3",
+      "title": "Go online",
+      "actor": "driver",
+      "what_happens": "The driver goes online. The app sends the driver's location every few seconds so dispatch knows who is nearby.",
+      "api": "POST /driver/availability  { online: true, lat, lng }   then   POST /driver/location  (batched points)",
+      "rules": ["A driver whose location stops updating for 2 minutes is taken offline automatically."],
+      "status": "built"
+    },
+    {
+      "id": "D4",
+      "title": "Pick a passenger (accept an offer)",
+      "actor": "driver",
+      "what_happens": "The driver gets an offer showing the pickup, destination, fare and pickup distance, and has 15 seconds to accept or decline.",
+      "api": "GET /driver/offers/current   then   POST /driver/offers/{id}/accept   or   POST /driver/offers/{id}/reject",
+      "rules": [
+        "ONE pending offer and ONE active trip per driver: no new offers until the current trip ends or is cancelled.",
+        "If several drivers race to accept, exactly one wins; the others get 'offer no longer available'.",
+        "Declines and timeouts count towards the driver's acceptance rate."
+      ],
+      "status": "built"
+    },
+    {
+      "id": "D5",
+      "title": "Drive to the pickup and start",
+      "actor": "driver",
+      "what_happens": "On the way → arrived (the system checks the driver is near the pickup) → start the trip (entering the passenger's PIN when that feature is on).",
+      "api": "POST /driver/trips/{id}/arriving → POST /driver/trips/{id}/arrived → POST /driver/trips/{id}/start  { pin }",
+      "rules": ["Waiting at pickup beyond the free minutes (3 in the demo rules) is charged per minute."],
+      "status": "built"
+    },
+    {
+      "id": "D6",
+      "title": "Cancel (the standard way)",
+      "actor": "driver",
+      "what_happens": "Before the trip starts the driver can cancel with a reason (e.g. passenger not reachable). The request closes and the passenger can request again.",
+      "api": "POST /driver/trips/{id}/cancel  { reason }",
+      "rules": ["Cancellations count towards the driver's cancellation rate. Repeated late cancellations can lead to suspension by staff."],
+      "status": "built"
+    },
+    {
+      "id": "D7",
+      "title": "Complete the ride and collect cash",
+      "actor": "driver",
+      "what_happens": "At the destination the driver completes the trip. The app shows the amount to collect; the driver takes the cash and confirms it.",
+      "api": "POST /driver/trips/{id}/complete   then   POST /driver/trips/{id}/cash-collected",
+      "status": "built"
+    },
+    {
+      "id": "D8",
+      "title": "See earnings and wallet",
+      "actor": "driver",
+      "what_happens": "The driver sees each trip's earning (fare minus platform commission) and their wallet: negative means they owe the organisation (cash they kept that includes the platform's share); positive means the organisation owes them.",
+      "api": "GET /driver/earnings   and   GET /driver/wallet",
+      "status": "built"
+    },
+    {
+      "id": "D9",
+      "title": "Pay the organisation (cash dues)",
+      "actor": "driver",
+      "what_happens": "Because passengers pay cash to the driver, the driver holds the platform's commission. The driver deposits it by bKash, Nagad, bank or at the office; finance records the deposit and it clears the dues.",
+      "where": "Admin panel → Payments → Driver dues → Record deposit",
+      "rules": ["Finance reconciles cash and deposits; differences raise an alert."],
+      "status": "built"
+    },
+    {
+      "id": "D10",
+      "title": "Get paid by the organisation (payouts)",
+      "actor": "admin",
+      "what_happens": "When a driver's wallet is positive (promo discounts the platform covered, incentives, cancellation fees), finance creates a weekly payout batch, a second finance person approves it, and the money is sent to the driver's verified bKash / Nagad / bank account and marked paid.",
+      "api": "Driver: PUT /driver/payout-account  { method, holder, ref }",
+      "where": "Admin panel → Payouts",
+      "rules": [
+        "Only balances of at least 500 are paid (setting payouts.minimum_amount).",
+        "The person who creates a batch cannot approve it (maker–checker).",
+        "Sending the money is manual today (bKash merchant portal or bank upload); automatic payout needs a provider API, see docs/integrations/payout-provider.md."
+      ],
+      "status": "partial"
+    }
+  ],
+
+  "money_flow": {
+    "summary": "Cash rides: the passenger pays the driver; the driver owes the organisation its share; the organisation pays the driver whatever it owes them. Every taka is recorded in a double-entry ledger that must always balance.",
+    "fare_formula": "fare = max(minimum fare, base + per_km × km + per_minute × minutes + waiting) × surge  + booking fee",
+    "who_gets_what": {
+      "driver": "fare − platform commission (commission is a percentage of the fare, set per fare rule)",
+      "organisation": "platform commission + booking fee + commission share of cancellation fees",
+      "organisation_costs": "promo discounts (the platform funds them), driver incentives, approved refunds"
+    },
+    "demo_rates": {
+      "bike": { "base": 25, "per_km": 12, "per_minute": 1, "minimum": 50, "booking_fee": 0, "commission_pct": 15, "cancellation_fee": 30 },
+      "car": { "base": 60, "per_km": 30, "per_minute": 3, "minimum": 150, "booking_fee": 10, "commission_pct": 20, "cancellation_fee": 50 },
+      "cng": { "base": 40, "per_km": 20, "per_minute": 2, "minimum": 90, "booking_fee": 5, "commission_pct": 18, "cancellation_fee": 40 }
+    },
+    "worked_examples": [
+      {
+        "case": "Bike, 6 km, 18 minutes, cash, no promo",
+        "fare": "25 + 6×12 + 18×1 = 115",
+        "passenger_pays_driver": 115,
+        "driver_earning": "115 − 15% (17.25) = 97.75",
+        "organisation_earns": 17.25,
+        "settlement": "The driver holds 115 but earned 97.75, so the driver wallet shows −17.25: the driver deposits 17.25 to the organisation (D9)."
+      },
+      {
+        "case": "Same ride with promo WELCOME50 (platform pays the 50)",
+        "fare": 115,
+        "passenger_pays_driver": 65,
+        "driver_earning": 97.75,
+        "organisation_earns": "17.25 commission − 50 promo = −32.75 (a marketing cost)",
+        "settlement": "The driver holds 65 but earned 97.75, so the wallet shows +32.75: the organisation pays the driver 32.75 in the next payout (D10)."
+      },
+      {
+        "case": "Car, 8 km, 25 minutes, cash",
+        "fare": "60 + 8×30 + 25×3 = 375, plus booking fee 10 = 385",
+        "passenger_pays_driver": 385,
+        "driver_earning": "375 − 20% (75) = 300",
+        "organisation_earns": "75 commission + 10 booking fee = 85",
+        "settlement": "Driver wallet −85: deposited to the organisation."
+      }
+    ],
+    "organisation_profit": {
+      "revenue": ["Commission on every completed ride", "Booking fee (car and CNG)", "Commission share of passenger cancellation fees"],
+      "minus": ["Promotions the platform funds", "Driver incentives (approved adjustments)", "Refunds", "Running costs outside this system (maps, SMS, hosting, staff)"],
+      "where_to_see_it": "Admin panel → Dashboard (gross bookings, platform revenue, contribution per ride), Analytics → Economics and Finance, Ledger (platform accounts)."
+    },
+    "controls": [
+      "Fares are frozen at quote time.",
+      "Refunds and adjustments need a second approver from 5,000 up (setting finance.dual_approval_threshold).",
+      "The ledger is checked every night; any imbalance raises an alert.",
+      "Every staff action needs a reason and is written to the audit log."
+    ]
+  },
+
+  "locks_and_fairness": {
+    "passenger": "One active request at a time. To book another ride, cancel the current one (standard cancel, fee rules apply) or wait until it completes or expires.",
+    "driver": "One pending offer and one active trip at a time. A new offer comes only after the current trip is completed or cancelled.",
+    "race_safety": "If many drivers accept the same ride at once, exactly one gets it (tested with 50 drivers at once)."
+  },
+
+  "not_built_yet": [
+    { "item": "Passenger and driver mobile apps", "note": "The API they need is built; see docs/spec/05-api.md." },
+    { "item": "Passenger chooses a specific driver", "note": "Today: automatic nearest-driver dispatch, or staff assign a driver. Design for passenger choice is in P5." },
+    { "item": "Nearby drivers drawn on the passenger's map", "note": "Today: the quote returns the count of nearby drivers." },
+    { "item": "Google Maps share links and place search", "note": "Needs the app and a geocoding provider (Google Places or Barikoi)." },
+    { "item": "bKash / Nagad / card payment by the passenger", "note": "Needs merchant accounts; see docs/integrations/digital-payments.md." },
+    { "item": "Automatic payouts to drivers", "note": "Today finance sends payouts by hand and marks them paid; see docs/integrations/payout-provider.md." }
+  ]
+}

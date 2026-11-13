@@ -1,0 +1,2 @@
+-- Reference data only (categories, permissions, templates).
+-- Never put credentials, passwords or real personal data here.

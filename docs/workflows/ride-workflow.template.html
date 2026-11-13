@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rider platform workflow</title>
+<style>
+  :root {
+    --bg: #f6f8f7; --card: #ffffff; --ink: #12201a; --muted: #5b6b63; --line: #dfe6e2;
+    --brand: #059669; --brand-soft: #d9f4e8;
+    --built: #059669; --built-bg: #d9f4e8; --partial: #b45309; --partial-bg: #fdecc8; --nb: #b91c1c; --nb-bg: #fde0e0;
+    --pax: #2563eb; --drv: #7c3aed; --sys: #0f766e; --adm: #c2410c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c1210; --card: #141c18; --ink: #e8f0ec; --muted: #93a39b; --line: #25322c;
+      --brand: #34d399; --brand-soft: #0f3a2b;
+      --built: #34d399; --built-bg: #0f3a2b; --partial: #fbbf24; --partial-bg: #3a2c08; --nb: #f87171; --nb-bg: #3d1414;
+      --pax: #60a5fa; --drv: #a78bfa; --sys: #2dd4bf; --adm: #fb923c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 28px 20px 8px; max-width: 1040px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  .note { margin: 14px 0 0; padding: 10px 14px; border-radius: 10px; background: var(--partial-bg); color: var(--ink); border: 1px solid var(--line); font-size: 14px; }
+  nav { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .tabs { max-width: 1040px; margin: 0 auto; display: flex; gap: 4px; padding: 10px 20px; overflow-x: auto; }
+  .tab { appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--muted); padding: 8px 16px; border-radius: 999px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .tab[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 18px; color: var(--muted); font-size: 13px; align-items: center; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .badge.built { background: var(--built-bg); color: var(--built); }
+  .badge.partial { background: var(--partial-bg); color: var(--partial); }
+  .badge.not_built { background: var(--nb-bg); color: var(--nb); }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 14px; }
+  .btn { appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 6px 12px; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
+  /* timeline */
+  .timeline { position: relative; margin: 0; padding: 0; list-style: none; }
+  .timeline::before { content: ""; position: absolute; left: 21px; top: 8px; bottom: 8px; width: 2px; background: var(--line); }
+  .step { position: relative; padding-left: 58px; margin-bottom: 14px; }
+  .dot { position: absolute; left: 0; top: 6px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 13px; box-shadow: 0 0 0 5px var(--bg); }
+  .dot.passenger { background: var(--pax); } .dot.driver { background: var(--drv); } .dot.system { background: var(--sys); } .dot.admin { background: var(--adm); }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  summary::-webkit-details-marker { display: none; }
+  summary .title { font-weight: 700; flex: 1 1 220px; }
+  summary .who { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  summary .chev { color: var(--muted); transition: transform .15s; }
+  details[open] summary .chev { transform: rotate(90deg); }
+  .body { padding: 0 16px 16px; border-top: 1px dashed var(--line); }
+  .body h4 { margin: 14px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .body p { margin: 0; }
+  .body ul { margin: 0; padding-left: 18px; }
+  code { background: var(--brand-soft); color: var(--ink); padding: 2px 6px; border-radius: 6px; font: 12.5px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+  .box { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: color-mix(in srgb, var(--brand-soft) 45%, var(--card)); font-size: 14px; }
+  .box.warn { background: var(--partial-bg); }
+  /* money */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 12px 0 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; }
+  h2 { margin: 26px 0 6px; font-size: 18px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 8px; }
+  .node { padding: 10px 14px; border-radius: 12px; font-weight: 700; color: #fff; text-align: center; font-size: 14px; }
+  .arrow { color: var(--muted); font-size: 12px; text-align: center; max-width: 140px; }
+  .ex { margin-bottom: 12px; }
+  .ex dl { margin: 8px 0 0; display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; font-size: 14px; }
+  .ex dt { color: var(--muted); } .ex dd { margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); } th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  .overview { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 20px; align-items: center; }
+  .chip { padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; color: #fff; }
+  /* mind map: branches grow to the right; click a node to fold or unfold it */
+  .mm-wrap { overflow: auto; padding: 8px 4px 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  .mm { display: inline-block; min-width: 100%; padding: 16px; }
+  .mm ul { list-style: none; margin: 0; padding: 0 0 0 28px; position: relative; display: flex; flex-direction: column; justify-content: center; }
+  .mm ul::before { content: ""; position: absolute; left: 0; top: 50%; width: 14px; border-top: 2px solid var(--line); }
+  .mm li { position: relative; padding: 4px 0 4px 14px; display: flex; align-items: center; }
+  .mm li::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; border-left: 2px solid var(--line); }
+  .mm li:first-child::before { top: 50%; } .mm li:last-child::before { bottom: 50%; } .mm li:only-child::before { display: none; }
+  .mm li::after { content: ""; position: absolute; left: 0; top: 50%; width: 14px; border-top: 2px solid var(--line); }
+  .mm > ul { padding-left: 0; } .mm > ul::before { display: none; } .mm > ul > li { padding-left: 0; } .mm > ul > li::before, .mm > ul > li::after { display: none; }
+  .mm .nd { display: flex; align-items: center; gap: 6px; max-width: 340px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); font-size: 13px; line-height: 1.35; text-align: left; font-family: inherit; color: var(--ink); }
+  .mm .nd.has { cursor: pointer; font-weight: 600; } .mm .nd.has:hover { border-color: var(--brand); }
+  .mm .d0 { background: var(--brand); border-color: var(--brand); color: #fff; font-size: 15px; font-weight: 700; padding: 10px 16px; }
+  .mm .d1 { background: var(--sys); border-color: var(--sys); color: #fff; font-size: 14px; }
+  .mm li[data-top="0"] > .nd.d1 { background: var(--pax); border-color: var(--pax); } .mm li[data-top="1"] > .nd.d1 { background: var(--drv); border-color: var(--drv); } .mm li[data-top="2"] > .nd.d1 { background: var(--adm); border-color: var(--adm); }
+  .mm .d2 { border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); background: var(--brand-soft); }
+  .mm .lf { font-weight: 400; color: var(--muted); }
+  .mm .tg { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 999px; font-weight: 700; flex: none; }
+  .mm .tg.built { background: var(--built-bg); color: var(--built); } .mm .tg.partial { background: var(--partial-bg); color: var(--partial); } .mm .tg.not_built { background: var(--nb-bg); color: var(--nb); }
+  .mm .cv { opacity: .7; flex: none; transition: transform .15s; } .mm .open > .nd .cv { transform: rotate(90deg); }
+  .exp { display: flex; gap: 8px; margin: 0 0 12px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 13px; }
+  .exp a { color: var(--brand); font-weight: 600; }
+  @media (max-width: 560px) { .ex dl { grid-template-columns: 1fr; } .step { padding-left: 52px; } .dot { width: 38px; height: 38px; } .timeline::before { left: 18px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <p id="how"></p>
+  <div class="note" id="important"></div>
+</header>
+<nav><div class="tabs" role="tablist" id="tabs"></div></nav>
+<main id="main"></main>
+
+<script id="data" type="application/json">/*__DATA__*/</script>
+<script id="tree" type="application/json">/*__TREE__*/</script>
+<script>
+const D = JSON.parse(document.getElementById("data").textContent);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v); // real handlers, not text
+    else n.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) n.append(k.nodeType ? k : document.createTextNode(k));
+  return n;
+};
+const STATUS = { built: "Built", partial: "Partly built", not_built: "Not built" };
+const badge = (s) => s ? el("span", { class: "badge " + s, title: D.status_legend[s] }, STATUS[s]) : null;
+const section = (label, content) => content ? [el("h4", {}, label), content] : [];
+const list = (items) => el("ul", {}, items.map((i) => el("li", {}, i)));
+const codeLine = (t) => el("p", {}, el("code", {}, t));
+
+document.getElementById("title").textContent = D.title;
+document.getElementById("how").textContent = D.how_to_read;
+document.getElementById("important").textContent = D.important;
+
+function stepView(s, prefix) {
+  const d = el("details", {});
+  d.append(el("summary", {},
+    el("span", { class: "title" }, s.title),
+    el("span", { class: "who", style: `color:var(--${({passenger:"pax",driver:"drv",system:"sys",admin:"adm"})[s.actor]})` }, s.actor),
+    badge(s.status),
+    el("span", { class: "chev" }, "›")));
+  const body = el("div", { class: "body" });
+  if (s.what_happens) body.append(...section("What happens", el("p", {}, s.what_happens)));
+  if (s.api) body.append(...section("API call", codeLine(s.api)));
+  if (s.where) body.append(...section("Where (admin panel)", el("p", {}, s.where)));
+  if (s.returns) body.append(...section("Returns", list(s.returns)));
+  if (s.rules) body.append(...section("Rules the system enforces", list(s.rules)));
+  if (s.about_choosing_a_driver) {
+    const a = s.about_choosing_a_driver;
+    body.append(...section("Who picks whom",
+      el("div", { class: "box" }, el("b", {}, "Driver picks passenger: "), a.driver_picks_passenger, el("br"), el("br"), el("b", {}, "Passenger picks driver: "), a.passenger_picks_driver)));
+  }
+  if (s.note) body.append(el("div", { class: "box warn" }, s.note));
+  d.append(body);
+  return el("li", { class: "step" }, el("span", { class: "dot " + s.actor }, s.id), d);
+}
+
+function timeline(steps) {
+  return el("ol", { class: "timeline" }, steps.map((s) => stepView(s)));
+}
+
+function expandControls(root) {
+  return el("div", { class: "toolbar" },
+    el("button", { class: "btn", onclick: () => root.querySelectorAll("details").forEach((d) => (d.open = true)) }, "Expand all"),
+    el("button", { class: "btn", onclick: () => root.querySelectorAll("details").forEach((d) => (d.open = false)) }, "Collapse all"));
+}
+
+const legend = () => el("div", { class: "legend" }, Object.keys(STATUS).map((k) => el("span", {}, badge(k), " ", D.status_legend[k])));
+
+const VIEWS = {
+  overview() {
+    const root = el("div");
+    root.append(legend());
+    root.append(el("h2", {}, "The whole journey"));
+    const chips = [["Passenger enables location", "pax"], ["Picks pickup & destination", "pax"], ["Sees fare & nearby drivers", "pax"], ["Requests ride", "pax"],
+      ["System offers to nearest driver", "sys"], ["Driver accepts", "drv"], ["Driver arrives & starts", "drv"], ["Ride completes", "drv"],
+      ["Passenger pays cash", "pax"], ["Driver confirms cash", "drv"], ["Passenger rates driver", "pax"], ["Driver pays organisation's share", "drv"], ["Organisation pays driver any balance", "adm"]];
+    const flow = el("div", { class: "overview" });
+    chips.forEach(([t, c], i) => { flow.append(el("span", { class: "chip", style: `background:var(--${c})` }, `${i + 1}. ${t}`)); });
+    root.append(flow);
+    root.append(el("h2", {}, "One-at-a-time rules"));
+    root.append(el("div", { class: "cards" },
+      el("div", { class: "card" }, el("h3", {}, "Passenger"), D.locks_and_fairness.passenger),
+      el("div", { class: "card" }, el("h3", {}, "Driver"), D.locks_and_fairness.driver),
+      el("div", { class: "card" }, el("h3", {}, "Race safety"), D.locks_and_fairness.race_safety)));
+    root.append(el("h2", {}, "Not built yet"));
+    root.append(el("table", {}, el("tbody", {}, D.not_built_yet.map((n) => el("tr", {}, el("td", {}, el("b", {}, n.item)), el("td", {}, n.note))))));
+    return root;
+  },
+  mindmap() {
+    const tree = JSON.parse(document.getElementById("tree").textContent);
+    const root = el("div");
+    const wrap = el("div", { class: "mm-wrap" });
+    const mm = el("div", { class: "mm" });
+    const build = (n, depth, top) => {
+      const has = Boolean(n.c && n.c.length);
+      const li = el("li", { "data-top": String(top) });
+      if (depth <= 1 || !has) li.classList.add("open"); // the root and its branches start open; steps start folded
+      const nd = el(has ? "button" : "div", { class: `nd d${Math.min(depth, 3)} ${has ? "has" : "lf"}` });
+      if (has) nd.append(el("span", { class: "cv" }, "›"));
+      nd.append(el("span", {}, n.t));
+      if (n.s) nd.append(el("span", { class: "tg " + n.s }, STATUS[n.s]));
+      li.append(nd);
+      if (has) {
+        const ul = el("ul", {}, n.c.map((k, i) => build(k, depth + 1, depth === 0 ? i : top)));
+        li.append(ul);
+        nd.addEventListener("click", () => { li.classList.toggle("open"); ul.style.display = li.classList.contains("open") ? "" : "none"; });
+        if (!li.classList.contains("open")) ul.style.display = "none";
+      }
+      return li;
+    };
+    mm.append(el("ul", {}, build(tree, 0, 0)));
+    wrap.append(mm);
+    const setAll = (open) => {
+      mm.querySelectorAll("li").forEach((li) => {
+        const ul = li.querySelector(":scope > ul");
+        if (!ul) return;
+        li.classList.toggle("open", open);
+        ul.style.display = open ? "" : "none";
+      });
+      mm.querySelector("li").classList.add("open"); mm.querySelector("li > ul").style.display = "";
+    };
+    root.append(el("div", { class: "exp" },
+      el("button", { class: "btn", onclick: () => setAll(true) }, "Expand all"),
+      el("button", { class: "btn", onclick: () => setAll(false) }, "Collapse all"),
+      el("span", {}, "Click a branch to fold or unfold it. Import into a mind-map app: "),
+      el("a", { href: "ride-workflow.mindmap.md", download: "" }, "Markdown (Markmap, XMind, Obsidian)"), " · ",
+      el("a", { href: "ride-workflow.opml", download: "" }, "OPML (XMind, MindNode, FreeMind)")));
+    root.append(wrap);
+    return root;
+  },
+  passenger() { const root = el("div"); root.append(legend(), expandControls(root), timeline(D.passenger_flow)); return root; },
+  driver() { const root = el("div"); root.append(legend(), expandControls(root), timeline(D.driver_flow)); return root; },
+  money() {
+    const m = D.money_flow, root = el("div");
+    root.append(el("p", {}, m.summary));
+    root.append(el("h2", {}, "Who pays whom (cash ride)"));
+    root.append(el("div", { class: "flow" },
+      el("span", { class: "node", style: "background:var(--pax)" }, "Passenger"),
+      el("span", { class: "arrow" }, "pays the full fare in cash →"),
+      el("span", { class: "node", style: "background:var(--drv)" }, "Driver"),
+      el("span", { class: "arrow" }, "deposits the commission (bKash / Nagad / bank / office) →"),
+      el("span", { class: "node", style: "background:var(--adm)" }, "Organisation")));
+    root.append(el("div", { class: "flow" },
+      el("span", { class: "node", style: "background:var(--adm)" }, "Organisation"),
+      el("span", { class: "arrow" }, "pays what it owes (promo discounts, incentives, cancellation fees) in the weekly payout →"),
+      el("span", { class: "node", style: "background:var(--drv)" }, "Driver")));
+    root.append(el("div", { class: "cards" },
+      el("div", { class: "card" }, el("h3", {}, "Fare"), el("code", {}, m.fare_formula)),
+      el("div", { class: "card" }, el("h3", {}, "Driver gets"), m.who_gets_what.driver),
+      el("div", { class: "card" }, el("h3", {}, "Organisation gets"), m.who_gets_what.organisation),
+      el("div", { class: "card" }, el("h3", {}, "Organisation pays for"), m.who_gets_what.organisation_costs)));
+    root.append(el("h2", {}, "Demo rates"));
+    root.append(el("table", {}, el("thead", {}, el("tr", {}, ["Vehicle", "Base", "Per km", "Per min", "Minimum", "Booking fee", "Commission", "Cancel fee"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, Object.entries(m.demo_rates).map(([k, r]) => el("tr", {}, el("td", {}, el("b", {}, k.toUpperCase())), el("td", {}, r.base), el("td", {}, r.per_km), el("td", {}, r.per_minute), el("td", {}, r.minimum), el("td", {}, r.booking_fee), el("td", {}, r.commission_pct + "%"), el("td", {}, r.cancellation_fee))))));
+    root.append(el("h2", {}, "Worked examples (BDT)"));
+    m.worked_examples.forEach((e) => root.append(el("div", { class: "card ex" }, el("h3", {}, e.case),
+      el("dl", {}, ["fare", "passenger_pays_driver", "driver_earning", "organisation_earns", "settlement"].flatMap((k) => e[k] === undefined ? [] :
+        [el("dt", {}, k.replaceAll("_", " ")), el("dd", {}, String(e[k]))])))));
+    root.append(el("h2", {}, "How the organisation profits"));
+    const p = m.organisation_profit;
+    root.append(el("div", { class: "cards" },
+      el("div", { class: "card" }, el("h3", {}, "Revenue"), list(p.revenue)),
+      el("div", { class: "card" }, el("h3", {}, "Minus"), list(p.minus)),
+      el("div", { class: "card" }, el("h3", {}, "Where to see it"), p.where_to_see_it)));
+    root.append(el("h2", {}, "Controls"), list(m.controls));
+    return root;
+  },
+};
+
+const tabs = [["overview", "Overview"], ["mindmap", "Mind map"], ["passenger", "Passenger journey"], ["driver", "Driver journey"], ["money", "Money & profit"]];
+const tabBar = document.getElementById("tabs"), main = document.getElementById("main");
+function show(id) {
+  tabBar.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.id === id)));
+  main.replaceChildren(VIEWS[id]());
+  history.replaceState(null, "", "#" + id);
+}
+tabs.forEach(([id, label]) => tabBar.append(el("button", { class: "tab", role: "tab", "data-id": id, onclick: () => show(id) }, label)));
+show(VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : "overview");
+</script>
+</body>
+</html>
